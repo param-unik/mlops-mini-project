@@ -18,7 +18,7 @@ from nltk.stem import WordNetLemmatizer
 import numpy as np
 import dagshub
 
-sys.path.append(str(Path(__file__).parent.parent))
+# sys.path.append(str(Path(__file__).parent.parent))
 from utility.utils import (
     lemmatization,
     remove_stop_words,

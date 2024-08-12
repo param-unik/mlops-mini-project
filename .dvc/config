@@ -1,0 +1,4 @@
+[core]
+    remote = miniremote
+['remote "miniremote"']
+    url = C:\Users\Param\AppData\Local\Temp
