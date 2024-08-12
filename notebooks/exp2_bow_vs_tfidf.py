@@ -2,6 +2,7 @@
 
 # Import necessary libraries
 import sys
+from pathlib import Path
 import mlflow
 import mlflow.sklearn
 from sklearn.feature_extraction.text import CountVectorizer, TfidfVectorizer
@@ -17,10 +18,8 @@ from nltk.stem import WordNetLemmatizer
 import numpy as np
 import dagshub
 
-# adding utility to the system path
-sys.path.insert(0, "C:\\Data-Science\\CampusX\\MLOps\\mlops-mini-project\\utility")
-
-from utils import (
+sys.path.append(str(Path(__file__).parent.parent))
+from utility.utils import (
     lemmatization,
     remove_stop_words,
     removing_numbers,
@@ -30,115 +29,142 @@ from utils import (
 )
 
 
-mlflow.set_tracking_uri("https://dagshub.com/param-unik/mlops-mini-project.mlflow")
-dagshub.init(repo_owner="param-unik", repo_name="mlops-mini-project", mlflow=True)
+def setup():
 
-# Load the data
-df = pd.read_csv(
-    "https://raw.githubusercontent.com/campusx-official/jupyter-masterclass/main/tweet_emotions.csv"
-).drop(columns=["tweet_id"])
-df.head()
+    mlflow.set_tracking_uri("https://dagshub.com/param-unik/mlops-mini-project.mlflow")
+    dagshub.init(repo_owner="param-unik", repo_name="mlops-mini-project", mlflow=True)
+
+
+def load_data():
+    # Load the data
+    df = pd.read_csv(
+        "https://raw.githubusercontent.com/campusx-official/jupyter-masterclass/main/tweet_emotions.csv"
+    ).drop(columns=["tweet_id"])
+
+    print(df.head())
+
+    return df
 
 
 def normalize_text(df):
     """Normalize the text data."""
     try:
-        df["content"] = df["content"].apply(lower_case)
-        df["content"] = df["content"].apply(remove_stop_words)
-        df["content"] = df["content"].apply(removing_numbers)
-        df["content"] = df["content"].apply(removing_punctuations)
-        df["content"] = df["content"].apply(removing_urls)
-        df["content"] = df["content"].apply(lemmatization)
+        df.loc[:, "content"] = df.loc[:, "content"].apply(lower_case)
+        df.loc[:, "content"] = df.loc[:, "content"].apply(remove_stop_words)
+        df.loc[:, "content"] = df.loc[:, "content"].apply(removing_numbers)
+        df.loc[:, "content"] = df.loc[:, "content"].apply(removing_punctuations)
+        df.loc[:, "content"] = df.loc[:, "content"].apply(removing_urls)
+        df.loc[:, "content"] = df.loc[:, "content"].apply(lemmatization)
         return df
     except Exception as e:
         print(f"Error during text normalization: {e}")
         raise
 
 
-x = df["sentiment"].isin(["happiness", "sadness"])
-df = df[x]
+def main(df):
 
-df["sentiment"] = df["sentiment"].map({"sadness": 0, "happiness": 1})
+    x = df.loc[:, "sentiment"].isin(["happiness", "sadness"])
+    df = df[x]
 
-# Normalize the text data
-df = normalize_text(df)
+    df.loc[:, "sentiment"] = df.loc[:, "sentiment"].map({"sadness": 0, "happiness": 1})
 
-# Set the experiment name
-mlflow.set_experiment("Bow vs TfIdf")
+    # Normalize the text data
+    df = normalize_text(df)
+    print("After normalization...")
+    print(df.head())
 
-# Define feature extraction methods
-vectorizers = {"BoW": CountVectorizer(), "TF-IDF": TfidfVectorizer()}
+    # Set the experiment name
+    mlflow.set_experiment("Bow vs TfIdf")
 
-# Define algorithms
-algorithms = {
-    "LogisticRegression": LogisticRegression(),
-    "MultinomialNB": MultinomialNB(),
-    "XGBoost": XGBClassifier(),
-    "RandomForest": RandomForestClassifier(),
-    "GradientBoosting": GradientBoostingClassifier(),
-}
+    # Define feature extraction methods
+    vectorizers = {
+        "BoW": CountVectorizer(),
+        "TF-IDF": TfidfVectorizer(),
+    }
 
-# Start the parent run
-with mlflow.start_run(run_name="All Experiments") as parent_run:
-    # Loop through algorithms and feature extraction methods (Child Runs)
-    for algo_name, algorithm in algorithms.items():
-        for vec_name, vectorizer in vectorizers.items():
-            with mlflow.start_run(
-                run_name=f"{algo_name} with {vec_name}", nested=True
-            ) as child_run:
-                X = vectorizer.fit_transform(df["content"])
-                y = df["sentiment"]
-                X_train, X_test, y_train, y_test = train_test_split(
-                    X, y, test_size=0.2, random_state=42
-                )
+    # Define algorithms
+    algorithms = {
+        "LogisticRegression": LogisticRegression(),
+        "MultinomialNB": MultinomialNB(),
+        "XGBoost": XGBClassifier(),
+        "RandomForest": RandomForestClassifier(),
+        "GradientBoosting": GradientBoostingClassifier(),
+    }
 
-                # Log preprocessing parameters
-                mlflow.log_param("vectorizer", vec_name)
-                mlflow.log_param("algorithm", algo_name)
-                mlflow.log_param("test_size", 0.2)
+    # Start the parent run
+    with mlflow.start_run(run_name="All Experiments") as parent_run:
 
-                # Model training
-                model = algorithm
-                model.fit(X_train, y_train)
+        # Loop through algorithms and feature extraction methods (Child Runs)
+        for algo_name, algorithm in algorithms.items():
+            for vec_name, vectorizer in vectorizers.items():
+                with mlflow.start_run(
+                    run_name=f"{algo_name} with {vec_name}", nested=True
+                ) as child_run:
+                    X = vectorizer.fit_transform(df["content"])
+                    y = df["sentiment"].astype("int8")
+                    X_train, X_test, y_train, y_test = train_test_split(
+                        X, y, test_size=0.2, random_state=42
+                    )
 
-                # Log model parameters
-                if algo_name == "LogisticRegression":
-                    mlflow.log_param("C", model.C)
-                elif algo_name == "MultinomialNB":
-                    mlflow.log_param("alpha", model.alpha)
-                elif algo_name == "XGBoost":
-                    mlflow.log_param("n_estimators", model.n_estimators)
-                    mlflow.log_param("learning_rate", model.learning_rate)
-                elif algo_name == "RandomForest":
-                    mlflow.log_param("n_estimators", model.n_estimators)
-                    mlflow.log_param("max_depth", model.max_depth)
-                elif algo_name == "GradientBoosting":
-                    mlflow.log_param("n_estimators", model.n_estimators)
-                    mlflow.log_param("learning_rate", model.learning_rate)
-                    mlflow.log_param("max_depth", model.max_depth)
+                    # Log preprocessing parameters
+                    mlflow.log_param("vectorizer", vec_name)
+                    mlflow.log_param("algorithm", algo_name)
+                    mlflow.log_param("test_size", 0.2)
 
-                # Model evaluation
-                y_pred = model.predict(X_test)
-                accuracy = accuracy_score(y_test, y_pred)
-                precision = precision_score(y_test, y_pred)
-                recall = recall_score(y_test, y_pred)
-                f1 = f1_score(y_test, y_pred)
+                    # Model training
+                    model = algorithm
+                    model.fit(X_train, y_train)
 
-                # Log evaluation metrics
-                mlflow.log_metric("accuracy", accuracy)
-                mlflow.log_metric("precision", precision)
-                mlflow.log_metric("recall", recall)
-                mlflow.log_metric("f1_score", f1)
+                    # Log model parameters
+                    if algo_name == "LogisticRegression":
+                        mlflow.log_param("C", model.C)
+                    elif algo_name == "MultinomialNB":
+                        mlflow.log_param("alpha", model.alpha)
+                    elif algo_name == "XGBoost":
+                        mlflow.log_param("n_estimators", model.n_estimators)
+                        mlflow.log_param("learning_rate", model.learning_rate)
+                    elif algo_name == "RandomForest":
+                        mlflow.log_param("n_estimators", model.n_estimators)
+                        mlflow.log_param("max_depth", model.max_depth)
+                    elif algo_name == "GradientBoosting":
+                        mlflow.log_param("n_estimators", model.n_estimators)
+                        mlflow.log_param("learning_rate", model.learning_rate)
+                        mlflow.log_param("max_depth", model.max_depth)
 
-                # Log model
-                mlflow.sklearn.log_model(model, "model")
+                    # Model evaluation
+                    y_pred = model.predict(X_test)
+                    accuracy = accuracy_score(y_test, y_pred)
+                    precision = precision_score(y_test, y_pred)
+                    recall = recall_score(y_test, y_pred)
+                    f1 = f1_score(y_test, y_pred)
 
-                # Save and log the notebook
-                mlflow.log_artifact(__file__)
+                    # Log evaluation metrics
+                    mlflow.log_metric("accuracy", accuracy)
+                    mlflow.log_metric("precision", precision)
+                    mlflow.log_metric("recall", recall)
+                    mlflow.log_metric("f1_score", f1)
 
-                # Print the results for verification
-                print(f"Algorithm: {algo_name}, Feature Engineering: {vec_name}")
-                print(f"Accuracy: {accuracy}")
-                print(f"Precision: {precision}")
-                print(f"Recall: {recall}")
-                print(f"F1 Score: {f1}")
+                    # Log model
+                    mlflow.sklearn.log_model(model, "model")
+
+                    # Save and log the notebook
+                    mlflow.log_artifact(__file__)
+
+                    # Print the results for verification
+                    print(f"Algorithm: {algo_name}, Feature Engineering: {vec_name}")
+                    print(f"Accuracy: {accuracy}")
+                    print(f"Precision: {precision}")
+                    print(f"Recall: {recall}")
+                    print(f"F1 Score: {f1}")
+
+
+if __name__ == "__main__":
+
+    # setting up the things mlfow and dagshub
+    setup()
+
+    # load the dataset
+    df = load_data()
+
+    # run the main process
+    main(df)
